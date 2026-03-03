@@ -1,14 +1,13 @@
 import { useContext, useState, useEffect } from 'react';
 import { SocketContext } from '../SocketContext';
 import Lobby from './Lobby';
-import { TRAITS_DB, getRandom } from '../db'; // Імпортуємо БД для реролу
+import { TRAITS_DB, getRandom } from '../db';
 
 // Компонент редактора характеристик (тільки для Хоста)
 const HostTraitEditor = ({ pId, tIdx, trait, onUpdate, onReroll, onReveal }) => {
-  const [val, setVal] = useState(trait.value);
+  const [val, setVal] = useState(trait?.value || '');
   
-  // Оновлюємо локальний стейт, якщо дані прийшли з сервера
-  useEffect(() => { setVal(trait.value); }, [trait.value]);
+  useEffect(() => { setVal(trait?.value || ''); }, [trait?.value]);
 
   return (
     <div className="flex flex-col gap-1 w-full animate-[fadeIn_0.3s_ease-out]">
@@ -25,7 +24,7 @@ const HostTraitEditor = ({ pId, tIdx, trait, onUpdate, onReroll, onReveal }) => 
           className="flex-1 bg-zinc-950/80 border border-zinc-700/50 focus:border-red-900/80 rounded p-1.5 text-zinc-200 outline-none text-[12px] resize-y min-h-[32px] w-full transition-colors leading-tight"
           value={val}
           onChange={(e) => setVal(e.target.value)}
-          onBlur={() => { if(val !== trait.value) onUpdate(pId, tIdx, val); }} // Зберігаємо на сервер тільки коли прибрали фокус (щоб не лагало)
+          onBlur={() => { if(val !== trait.value) onUpdate(pId, tIdx, val); }} 
           title="Натисни, щоб змінити текст вручну"
         />
         <button 
@@ -56,7 +55,9 @@ export default function Home() {
         
         if (remaining === 0 && isHost) {
           clearInterval(interval);
-          updateGameState({ ...gameState, timer: { isRunning: false, pausedLeft: 0, endsAt: null } });
+          const newData = JSON.parse(JSON.stringify(gameState));
+          newData.timer = { isRunning: false, pausedLeft: 0, endsAt: null };
+          updateGameState(newData);
         }
       }, 200); 
     } else {
@@ -69,44 +70,45 @@ export default function Home() {
 
   const handleTimerAction = (action) => {
     if (!isHost) return;
-    const newTimer = { ...gameState.timer };
+    const newData = JSON.parse(JSON.stringify(gameState));
     
     if (action === 'start') {
-      newTimer.isRunning = true;
-      newTimer.endsAt = Date.now() + newTimer.pausedLeft * 1000;
+      newData.timer.isRunning = true;
+      newData.timer.endsAt = Date.now() + newData.timer.pausedLeft * 1000;
     } else if (action === 'pause') {
-      newTimer.isRunning = false;
-      newTimer.pausedLeft = localTimeLeft;
-      newTimer.endsAt = null;
+      newData.timer.isRunning = false;
+      newData.timer.pausedLeft = localTimeLeft;
+      newData.timer.endsAt = null;
     } else if (action === 'reset') {
-      newTimer.isRunning = false;
-      newTimer.pausedLeft = 60;
-      newTimer.endsAt = null;
+      newData.timer.isRunning = false;
+      newData.timer.pausedLeft = 60;
+      newData.timer.endsAt = null;
     }
-    updateGameState({ ...gameState, timer: newTimer });
+    updateGameState(newData);
   };
 
-  const revealTraitAsHost = (targetPlayerId, traitIndex) => {
-    if (isHost) {
-      socket.emit('reveal_trait', { roomCode, targetPlayerId, traitIndex });
-    }
-  };
-
-  // Збереження ручного редагування тексту характеристики
-  const handleTraitChange = (pId, tIdx, newVal) => {
+  // НАДІЙНЕ ВІДКРИТТЯ ХАРАКТЕРИСТИКИ
+  const revealTraitAsHost = (pId, tIdx) => {
     if (!isHost) return;
-    const newData = { ...gameState };
-    const pIndex = newData.players.findIndex(p => p.id === pId);
-    if (pIndex > -1) {
-      newData.players = [...newData.players]; 
-      newData.players[pIndex] = { ...newData.players[pIndex] };
-      newData.players[pIndex].traits = [...newData.players[pIndex].traits];
-      newData.players[pIndex].traits[tIdx] = { ...newData.players[pIndex].traits[tIdx], value: newVal };
+    const newData = JSON.parse(JSON.stringify(gameState)); // Глибока копія для уникнення крашів
+    const player = newData.players.find(p => p.id === pId);
+    if (player && player.traits[tIdx]) {
+      player.traits[tIdx].visible = true;
       updateGameState(newData);
     }
   };
 
-  // Логіка рандомного реролу конкретної характеристики
+  // НАДІЙНА ЗМІНА ТЕКСТУ
+  const handleTraitChange = (pId, tIdx, newVal) => {
+    if (!isHost) return;
+    const newData = JSON.parse(JSON.stringify(gameState));
+    const player = newData.players.find(p => p.id === pId);
+    if (player && player.traits[tIdx]) {
+      player.traits[tIdx].value = newVal;
+      updateGameState(newData);
+    }
+  };
+
   const handleTraitReroll = (pId, tIdx, label) => {
     if (!isHost) return;
     let newValue = '';
@@ -139,24 +141,22 @@ export default function Home() {
     handleTraitChange(pId, tIdx, newValue);
   };
 
-  const toggleNomination = (pIdx) => {
+  const toggleNomination = (pId) => {
     if (!isHost) return;
-    const newData = { ...gameState };
-    newData.players = [...newData.players]; 
-    newData.players[pIdx] = { ...newData.players[pIdx], isNominated: !newData.players[pIdx].isNominated };
-    updateGameState(newData);
+    const newData = JSON.parse(JSON.stringify(gameState));
+    const player = newData.players.find(p => p.id === pId);
+    if (player) {
+      player.isNominated = !player.isNominated;
+      updateGameState(newData);
+    }
   };
 
   const handleVote = (pId, delta) => {
     if (!isHost) return;
-    const newData = { ...gameState };
-    const pIndex = newData.players.findIndex(p => p.id === pId);
-    if (pIndex > -1) {
-      newData.players = [...newData.players]; 
-      newData.players[pIndex] = { 
-        ...newData.players[pIndex], 
-        votes: Math.max(0, (newData.players[pIndex].votes || 0) + delta) 
-      };
+    const newData = JSON.parse(JSON.stringify(gameState));
+    const player = newData.players.find(p => p.id === pId);
+    if (player) {
+      player.votes = Math.max(0, (player.votes || 0) + delta);
       updateGameState(newData);
     }
   };
@@ -165,14 +165,18 @@ export default function Home() {
     if (!kickTarget) return;
     const pId = kickTarget.id;
     
-    const remainingPlayers = gameState.players.filter(p => p.id !== pId);
-    const resetPlayers = remainingPlayers.map(p => ({
+    const newData = JSON.parse(JSON.stringify(gameState));
+    // Видаляємо гравця
+    newData.players = newData.players.filter(p => p.id !== pId);
+    
+    // Скидаємо голоси та номінації всім іншим
+    newData.players = newData.players.map(p => ({
       ...p,
       votes: 0,
       isNominated: false
     }));
 
-    updateGameState({ ...gameState, players: resetPlayers });
+    updateGameState(newData);
     socket.emit('kick_player', { roomCode, targetPlayerId: pId });
     setKickTarget(null); 
   };
@@ -250,12 +254,12 @@ export default function Home() {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-start">
-          {gameState.players.map((p, pIdx) => (
+          {gameState.players.map((p) => (
             <div key={p.id} className={`flex flex-col bg-zinc-900/90 rounded-xl border transition-all duration-300 ${p.isNominated ? 'border-red-900/60 bg-red-950/20 shadow-[0_0_20px_rgba(153,27,27,0.15)] scale-[1.01]' : 'border-zinc-800 hover:border-zinc-700'}`}>
               <div className="p-2.5 flex justify-between items-center border-b border-zinc-800/50 bg-zinc-950/30 rounded-t-xl">
                 <h3 className="text-sm font-bold text-zinc-100 truncate pr-2">{p.name} {p.id === me.id ? <span className="text-zinc-500 text-[10px] ml-1">(Ти)</span> : ''}</h3>
                 {isHost && (
-                  <button onClick={() => toggleNomination(pIdx)} className={`text-sm transition-transform hover:scale-125 ${p.isNominated ? 'opacity-100 drop-shadow-md' : 'opacity-30 grayscale'}`}>🎯</button>
+                  <button onClick={() => toggleNomination(p.id)} className={`text-sm transition-transform hover:scale-125 ${p.isNominated ? 'opacity-100 drop-shadow-md' : 'opacity-30 grayscale'}`}>🎯</button>
                 )}
               </div>
 
