@@ -1,6 +1,44 @@
 import { useContext, useState, useEffect } from 'react';
 import { SocketContext } from '../SocketContext';
 import Lobby from './Lobby';
+import { TRAITS_DB, getRandom } from '../db'; // Імпортуємо БД для реролу
+
+// Компонент редактора характеристик (тільки для Хоста)
+const HostTraitEditor = ({ pId, tIdx, trait, onUpdate, onReroll, onReveal }) => {
+  const [val, setVal] = useState(trait.value);
+  
+  // Оновлюємо локальний стейт, якщо дані прийшли з сервера
+  useEffect(() => { setVal(trait.value); }, [trait.value]);
+
+  return (
+    <div className="flex flex-col gap-1 w-full animate-[fadeIn_0.3s_ease-out]">
+      {!trait.visible && (
+        <button 
+          onClick={() => onReveal(pId, tIdx)}
+          className="text-[10px] bg-red-900/80 hover:bg-red-700 px-2 py-0.5 rounded text-white font-bold tracking-wider self-start transition-colors"
+        >
+          ВІДКРИТИ ВСІМ
+        </button>
+      )}
+      <div className="flex items-start gap-1 w-full mt-0.5">
+        <textarea
+          className="flex-1 bg-zinc-950/80 border border-zinc-700/50 focus:border-red-900/80 rounded p-1.5 text-zinc-200 outline-none text-[12px] resize-y min-h-[32px] w-full transition-colors leading-tight"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => { if(val !== trait.value) onUpdate(pId, tIdx, val); }} // Зберігаємо на сервер тільки коли прибрали фокус (щоб не лагало)
+          title="Натисни, щоб змінити текст вручну"
+        />
+        <button 
+          onClick={() => onReroll(pId, tIdx, trait.label)} 
+          className="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-[14px] transition-all hover:scale-110"
+          title="Випадкове значення (Рандом)"
+        >
+          🎲
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export default function Home() {
   const { gameState, isHost, me, roomCode, socket, updateGameState } = useContext(SocketContext);
@@ -52,6 +90,53 @@ export default function Home() {
     if (isHost) {
       socket.emit('reveal_trait', { roomCode, targetPlayerId, traitIndex });
     }
+  };
+
+  // Збереження ручного редагування тексту характеристики
+  const handleTraitChange = (pId, tIdx, newVal) => {
+    if (!isHost) return;
+    const newData = { ...gameState };
+    const pIndex = newData.players.findIndex(p => p.id === pId);
+    if (pIndex > -1) {
+      newData.players = [...newData.players]; 
+      newData.players[pIndex] = { ...newData.players[pIndex] };
+      newData.players[pIndex].traits = [...newData.players[pIndex].traits];
+      newData.players[pIndex].traits[tIdx] = { ...newData.players[pIndex].traits[tIdx], value: newVal };
+      updateGameState(newData);
+    }
+  };
+
+  // Логіка рандомного реролу конкретної характеристики
+  const handleTraitReroll = (pId, tIdx, label) => {
+    if (!isHost) return;
+    let newValue = '';
+    
+    if (label === 'Стать та вік') {
+      const sex = Math.random() > 0.5 ? "Чоловік" : "Жінка";
+      const age = Math.floor(Math.random() * 45) + 18;
+      newValue = `${sex}, ${age} р.`;
+    } else if (label === 'Професія') {
+      newValue = getRandom(TRAITS_DB.professions).name; 
+    } else if (label === 'Здоров\'я') {
+      const h = getRandom(TRAITS_DB.health);
+      newValue = `${h.val}% (${h.name})`;
+    } else if (label === 'Хобі') {
+      newValue = getRandom(TRAITS_DB.hobbies);
+    } else if (label === 'Фобія') {
+      newValue = getRandom(TRAITS_DB.phobias);
+    } else if (label === 'Багаж') {
+      newValue = getRandom(TRAITS_DB.luggage);
+    } else if (label === 'Великий багаж') {
+      newValue = getRandom(TRAITS_DB.large_luggage);
+    } else if (label === 'Факт' || label === 'Приховано') {
+      newValue = getRandom(TRAITS_DB.facts);
+    } else if (label.startsWith('Дія')) {
+      newValue = getRandom(TRAITS_DB.actions);
+    } else {
+      newValue = "Оновлене значення";
+    }
+
+    handleTraitChange(pId, tIdx, newValue);
   };
 
   const toggleNomination = (pIdx) => {
@@ -157,7 +242,6 @@ export default function Home() {
               {myCard.traits.map((t, idx) => (
                  <div key={idx} className="bg-zinc-900/80 px-3 py-2 rounded-md border border-zinc-800/80 text-xs flex gap-2 items-start hover:border-green-900/50 transition-colors max-w-sm">
                    <span className="text-zinc-500 font-medium shrink-0 mt-0.5" title={t.label}>{t.icon}</span>
-                   {/* ПРИБРАЛИ truncate ТА ДОДАЛИ break-words ДЛЯ ОСОБОВОЇ СПРАВИ */}
                    <span className="text-zinc-200 break-words leading-relaxed whitespace-pre-wrap">{t.value}</span>
                  </div>
               ))}
@@ -184,19 +268,20 @@ export default function Home() {
                     
                     <span className="shrink-0 mt-0.5">{t.icon}</span>
                     
-                    {/* ПРИБРАЛИ truncate ДЛЯ ПУБЛІЧНОЇ ДОШКИ */}
-                    <div className="flex-1 min-w-0">
-                      {t.visible ? (
-                        <span className="animate-[fadeIn_0.5s_ease-out] block break-words whitespace-pre-wrap leading-tight">{t.value}</span>
-                      ) : isHost ? (
-                        <button 
-                          onClick={() => revealTraitAsHost(p.id, tIdx)}
-                          className="text-[11px] bg-zinc-800 hover:bg-zinc-700 hover:text-white px-2 py-1.5 rounded text-zinc-400 w-full text-left transition-all break-words whitespace-normal leading-tight"
-                        >
-                          [ {t.value} ]
-                        </button>
+                    <div className="flex-1 min-w-0 flex items-center">
+                      {isHost ? (
+                        <HostTraitEditor 
+                          pId={p.id} 
+                          tIdx={tIdx} 
+                          trait={t} 
+                          onUpdate={handleTraitChange} 
+                          onReroll={handleTraitReroll} 
+                          onReveal={revealTraitAsHost} 
+                        />
+                      ) : t.visible ? (
+                        <span className="animate-[fadeIn_0.5s_ease-out] block break-words whitespace-pre-wrap leading-tight text-zinc-200">{t.value}</span>
                       ) : (
-                        <span className="text-[10px] tracking-widest opacity-40 select-none uppercase font-bold block pt-0.5">Приховано</span>
+                        <span className="text-[10px] tracking-widest opacity-40 select-none uppercase font-bold block pt-0.5 text-zinc-500">Приховано</span>
                       )}
                     </div>
                   </div>
