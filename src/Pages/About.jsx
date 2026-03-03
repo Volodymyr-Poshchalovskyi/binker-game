@@ -11,7 +11,6 @@ export default function About() {
   const [micro, setMicro] = useState(MICRO_CRISES[0]);
   const [players, setPlayers] = useState([]);
 
-  // Захист: якщо не ведучий, повертаємо на головну
   if (!isHost) {
     return <Navigate to="/" />;
   }
@@ -26,7 +25,7 @@ export default function About() {
         id: p.id,
         name: p.name,
         isNominated: false,
-        votes: 0, // Додаємо голоси при генерації
+        votes: 0,
         traits: Array(11).fill({ label: '', icon: '', value: '', visible: false })
       }));
       setPlayers(initializedPlayers);
@@ -34,13 +33,13 @@ export default function About() {
   }, [roomPlayers, me.id]);
 
   const rerollWorld = (type) => {
-    if (type === 'macro' || type === 'all') setMacro(getRandom(MACRO_SCENARIOS));
-    if (type === 'micro' || type === 'all') setMicro(getRandom(MICRO_CRISES));
+    if (type === 'macro' || type === 'all') setMacro({ ...getRandom(MACRO_SCENARIOS), customText: '' });
+    if (type === 'micro' || type === 'all') setMicro({ ...getRandom(MICRO_CRISES), customText: '' });
   };
 
   const generateAllPlayers = () => {
     let hasMale = false; let hasFemale = false;
-    const activeTags = [...macro.tags, ...micro.tags];
+    const activeTags = [...(macro.tags || []), ...(micro.tags || [])];
 
     const newPlayers = players.map((p, idx) => {
       let sex = Math.random() > 0.5 ? "Чоловік" : "Жінка";
@@ -78,7 +77,6 @@ export default function About() {
   };
 
   const startGame = () => {
-    // Додаємо синхронізований таймер до стану гри
     const timerData = { isRunning: false, pausedLeft: 60, endsAt: null };
     const gameData = { players, macro, micro, isStarted: true, timer: timerData };
     socket.emit('start_game', { roomCode, gameData });
@@ -92,26 +90,38 @@ export default function About() {
       </header>
       
       <section className="grid md:grid-cols-2 gap-6">
-        <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-xl space-y-4 hover:border-zinc-700 transition-colors">
+        <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-xl space-y-4 hover:border-zinc-700 transition-colors flex flex-col">
           <div className="flex justify-between items-center">
             <h2 className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Макросценарій (Світ)</h2>
             <button onClick={() => rerollWorld('macro')} className="text-xs bg-zinc-800 hover:bg-zinc-700 px-3 py-1 rounded text-zinc-300 transition">Reroll</button>
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="text-xl font-bold text-red-400 mb-2">{macro.name}</h3>
-            <p className="text-sm text-zinc-300 mb-3">{macro.desc}</p>
+            <p className="text-sm text-zinc-300 mb-4">{macro.desc}</p>
           </div>
+          <textarea 
+            placeholder="Додати свої умови до світу (опційно)..."
+            value={macro.customText || ''}
+            onChange={(e) => setMacro({...macro, customText: e.target.value})}
+            className="w-full p-3 bg-zinc-950 border border-zinc-800 rounded-lg text-sm text-zinc-200 outline-none focus:border-red-900/50 resize-y min-h-[60px] transition-colors"
+          />
         </div>
 
-        <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-xl space-y-4 hover:border-zinc-700 transition-colors">
+        <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-xl space-y-4 hover:border-zinc-700 transition-colors flex flex-col">
           <div className="flex justify-between items-center">
             <h2 className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Мікрокриза (Бункер)</h2>
             <button onClick={() => rerollWorld('micro')} className="text-xs bg-zinc-800 hover:bg-zinc-700 px-3 py-1 rounded text-zinc-300 transition">Reroll</button>
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="text-xl font-bold text-orange-400 mb-2">{micro.category}</h3>
-            <p className="text-sm text-zinc-300 mb-3">{micro.desc}</p>
+            <p className="text-sm text-zinc-300 mb-4">{micro.desc}</p>
           </div>
+          <textarea 
+            placeholder="Додати свої умови до бункера (опційно)..."
+            value={micro.customText || ''}
+            onChange={(e) => setMicro({...micro, customText: e.target.value})}
+            className="w-full p-3 bg-zinc-950 border border-zinc-800 rounded-lg text-sm text-zinc-200 outline-none focus:border-orange-900/50 resize-y min-h-[60px] transition-colors"
+          />
         </div>
       </section>
 
