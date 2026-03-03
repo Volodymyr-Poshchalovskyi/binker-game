@@ -1,4 +1,4 @@
-// server.js
+// server.js (БЕКЕНД)
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -10,15 +10,13 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Дозволяємо підключення з будь-якого домену (твого localhost та Vercel)
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
 
-// Зберігаємо стан кімнат у пам'яті
 const rooms = {};
 
-// Генерація 5-значного коду (цифри + літери)
 const generateRoomCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
@@ -31,42 +29,47 @@ const generateRoomCode = () => {
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
-  // Створення кімнати (Ведучий)
   socket.on('create_room', (user, callback) => {
     let roomCode = generateRoomCode();
-    // Гарантуємо унікальність коду
-    while (rooms[roomCode]) {
-      roomCode = generateRoomCode();
-    }
+    while (rooms[roomCode]) roomCode = generateRoomCode();
 
     rooms[roomCode] = {
       hostId: user.id,
       players: [user],
-      gameState: null // Тут буде макро, мікро і згенеровані гравці
+      gameState: null 
     };
 
     socket.join(roomCode);
     callback({ success: true, roomCode });
   });
 
-  // Приєднання до кімнати (Гравці)
   socket.on('join_room', ({ roomCode, user }, callback) => {
     const code = roomCode.toUpperCase();
     const room = rooms[code];
 
-    if (!room) {
-      return callback({ success: false, error: 'Кімнату не знайдено' });
-    }
+    if (!room) return callback({ success: false, error: 'Кімнату не знайдено' });
+
+    // ЛОГІКА ПЕРЕПІДКЛЮЧЕННЯ (Якщо гра вже йде, пускаємо тільки своїх)
     if (room.gameState) {
-      return callback({ success: false, error: 'Гра вже почалася' });
+      const isExistingPlayer = room.gameState.players.some(p => p.id === user.id);
+      const isHost = room.hostId === user.id;
+
+      if (isExistingPlayer || isHost) {
+        socket.join(code);
+        // Одразу відправляємо людині поточний стан гри, щоб вона відновила екран
+        socket.emit('game_started', room.gameState); 
+        return callback({ success: true, roomCode: code });
+      } else {
+        return callback({ success: false, error: 'Гра вже почалася, вхід закрито' });
+      }
     }
 
-    // Додаємо гравця, якщо його ще там немає
+    // Звичайний вхід (якщо гра ще не почалась)
     const existingPlayerIndex = room.players.findIndex(p => p.id === user.id);
     if (existingPlayerIndex === -1) {
         room.players.push(user);
     } else {
-        room.players[existingPlayerIndex] = user; // Оновлюємо ім'я, якщо змінилося
+        room.players[existingPlayerIndex] = user; 
     }
 
     socket.join(code);
@@ -74,16 +77,14 @@ io.on('connection', (socket) => {
     callback({ success: true, roomCode: code });
   });
 
-  // Запуск гри ведучим (передача згенерованих даних)
   socket.on('start_game', ({ roomCode, gameData }) => {
-    const room = rooms[roomCode];
+    const room = rooms[code = roomCode];
     if (room) {
       room.gameState = gameData;
       io.to(roomCode).emit('game_started', room.gameState);
     }
   });
 
-  // Відкриття характеристики ведучим
   socket.on('reveal_trait', ({ roomCode, targetPlayerId, traitIndex }) => {
     const room = rooms[roomCode];
     if (room && room.gameState) {
@@ -95,7 +96,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Інші дії (номінація, голосування, кік)
   socket.on('update_game_state', ({ roomCode, newState }) => {
     const room = rooms[roomCode];
     if (room) {
@@ -104,7 +104,20 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Скидання кімнати
+  // НОВА КОМАНДА ДЛЯ КІКУ
+  socket.on('kick_player', ({ roomCode, targetPlayerId }) => {
+    const room = rooms[roomCode];
+    if (room && room.gameState) {
+      room.gameState.players = room.gameState.players.filter(p => p.id !== targetPlayerId);
+      room.players = room.players.filter(p => p.id !== targetPlayerId);
+      
+      io.to(roomCode).emit('game_updated', room.gameState);
+      io.to(roomCode).emit('room_updated', room.players);
+      // Кажемо конкретному гравцю, що його вигнали
+      io.to(roomCode).emit('player_kicked', targetPlayerId); 
+    }
+  });
+
   socket.on('reset_room', (roomCode) => {
     const room = rooms[roomCode];
     if (room) {
@@ -115,7 +128,6 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
-    // Можна додати логіку відключення, але для простоти поки залишаємо гравців у списку
   });
 });
 
