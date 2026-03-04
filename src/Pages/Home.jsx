@@ -3,13 +3,12 @@ import { SocketContext } from '../SocketContext';
 import Lobby from './Lobby';
 import { TRAITS_DB, getRandom } from '../db';
 
-// --- АУДІО ДВИЖОК (Генерація ретро-звуків без MP3) ---
+// --- АУДІО ДВИЖОК ---
 const playSfx = (type) => {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
     const ctx = new AudioContext();
-    
     if (type === 'type') {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -34,10 +33,48 @@ const playSfx = (type) => {
       osc.start();
       osc.stop(ctx.currentTime + 0.25);
     }
-  } catch (e) { console.log("Audio not supported"); }
+  } catch (e) { console.log("Audio error"); }
 };
 
-// Анімація "Декодування" тексту (Термінальний друк)
+// --- ФАЗА ЗАВАНТАЖЕННЯ ---
+const BootSequence = ({ onComplete }) => {
+  const [lines, setLines] = useState([]);
+  useEffect(() => {
+    const bootText = [
+      "ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM",
+      "COPYRIGHT 2077 ROBCO INDUSTRIES",
+      "Initializing core protocols.................. [OK]",
+      "Memory check: 640K......................... [OK]",
+      "Establishing secure connection to Bunker... [OK]",
+      "Decrypting personnel dossiers.............. [OK]",
+      "WARNING: EXTERNAL THREAT LEVEL CRITICAL",
+      "BUNKER_OS v2.4.2 READY. LOADING UI..."
+    ];
+    let i = 0;
+    const interval = setInterval(() => {
+      setLines(prev => [...prev, bootText[i]]);
+      playSfx('type');
+      i++;
+      if (i >= bootText.length) {
+        clearInterval(interval);
+        setTimeout(onComplete, 1000);
+      }
+    }, 300);
+    return () => clearInterval(interval);
+  }, [onComplete]);
+
+  return (
+    <div className="fixed inset-0 z-[200] bg-[#020802] text-green-500 font-mono p-8 text-sm flex flex-col justify-start">
+      {lines.map((l, idx) => (
+        <div key={idx} className="mb-2 term-text">
+          {l && typeof l === 'string' && l.includes('WARNING') ? <span className="text-red-500 term-text-red animate-pulse">{l}</span> : l}
+        </div>
+      ))}
+      <div className="animate-pulse mt-2 w-3 h-5 bg-green-500"></div>
+    </div>
+  );
+};
+
 const DecodedText = ({ text }) => {
   const [display, setDisplay] = useState('');
   useEffect(() => {
@@ -60,7 +97,6 @@ const DecodedText = ({ text }) => {
   return <span>{display}<span className="animate-pulse">_</span></span>;
 };
 
-// Редактор Хоста (Fallout Style)
 const HostTraitEditor = ({ pId, tIdx, trait, onUpdate, onReroll, onReveal }) => {
   const [val, setVal] = useState(trait?.value || '');
   const textareaRef = useRef(null);
@@ -77,13 +113,7 @@ const HostTraitEditor = ({ pId, tIdx, trait, onUpdate, onReroll, onReveal }) => 
   return (
     <div className="flex items-start gap-1 w-full mt-1 relative z-20">
       {!trait.visible && (
-        <button 
-          onClick={() => { playSfx('type'); onReveal(pId, tIdx); }}
-          className="shrink-0 text-[10px] bg-green-900/40 hover:bg-green-500 hover:text-black text-green-500 border border-green-500 px-1 py-0.5 font-bold active:scale-95 transition-colors"
-          title="Відкрити всім"
-        >
-          [DEC]
-        </button>
+        <button onClick={() => { playSfx('type'); onReveal(pId, tIdx); }} className="shrink-0 text-[10px] bg-green-900/40 hover:bg-green-500 hover:text-black text-green-500 border border-green-500 px-1 py-0.5 font-bold active:scale-95 transition-colors" title="Відкрити всім">[DEC]</button>
       )}
       <textarea
         ref={textareaRef}
@@ -93,25 +123,25 @@ const HostTraitEditor = ({ pId, tIdx, trait, onUpdate, onReroll, onReveal }) => 
         onBlur={() => { if(val !== trait.value) onUpdate(pId, tIdx, val); }} 
         spellCheck="false"
       />
-      <button 
-        onClick={() => onReroll(pId, tIdx, trait.label)} 
-        className="shrink-0 text-[10px] bg-green-900/40 hover:bg-green-500 hover:text-black text-green-500 border border-green-500 px-1 py-0.5 active:scale-95 transition-colors font-bold"
-        title="Випадкове значення"
-      >
-        [RND]
-      </button>
+      <button onClick={() => onReroll(pId, tIdx, trait.label)} className="shrink-0 text-[10px] bg-green-900/40 hover:bg-green-500 hover:text-black text-green-500 border border-green-500 px-1 py-0.5 active:scale-95 transition-colors font-bold" title="Випадкове значення">[RND]</button>
     </div>
   );
 };
 
 export default function Home() {
   const { gameState, isHost, me, roomCode, socket, updateGameState } = useContext(SocketContext);
-  
   const [kickTarget, setKickTarget] = useState(null); 
   const [showSynopsis, setShowSynopsis] = useState(true); 
+  const [showDossier, setShowDossier] = useState(true);
   const [showLog, setShowLog] = useState(false);
+  const [isBooting, setIsBooting] = useState(() => !sessionStorage.getItem(`bunker_booted_${roomCode}`));
 
   if (!gameState) return <Lobby />;
+
+  const handleBootComplete = () => {
+    sessionStorage.setItem(`bunker_booted_${roomCode}`, 'true');
+    setIsBooting(false);
+  };
 
   const addLog = (message, stateObj) => {
     const data = stateObj || gameState;
@@ -127,7 +157,7 @@ export default function Home() {
     const player = newData.players.find(p => p.id === pId);
     if (player && player.traits[tIdx]) {
       player.traits[tIdx].visible = true;
-      addLog(`SYS_MSG: [${player.traits[tIdx].label}] DECRYPTED FOR UNIT_${player.name.substring(0,3).toUpperCase()}`, newData);
+      addLog(`SYS_MSG: [${player.traits[tIdx].label}] DECRYPTED`, newData);
       updateGameState(newData);
     }
   };
@@ -160,7 +190,6 @@ export default function Home() {
     const player = newData.players.find(p => p.id === pId);
     if (player) {
       player.traits[tIdx].value = newValue;
-      addLog(`SYS_MSG: PARAMETER [${label}] REROLLED FOR UNIT_${player.name.substring(0,3).toUpperCase()}`, newData);
       updateGameState(newData);
     }
   };
@@ -177,9 +206,8 @@ export default function Home() {
         p1.traits[tIdx1].visible = p2.traits[tIdx2].visible;
         p2.traits[tIdx2].value = tempVal;
         p2.traits[tIdx2].visible = tempVis;
-        addLog(`SYS_OP: DATA SWAP EXECUTED BETWEEN ${p1.name} AND ${p2.name}`, newData);
         updateGameState(newData);
-    } else { alert("ERROR: DATA TYPE MISMATCH."); }
+    }
   };
 
   const toggleNomination = (pId) => {
@@ -188,7 +216,6 @@ export default function Home() {
     const player = newData.players.find(p => p.id === pId);
     if (player) {
       player.isNominated = !player.isNominated;
-      addLog(`TARGET: UNIT_${player.name.toUpperCase()} ${player.isNominated ? 'MARKED FOR PURGE' : 'CLEARED'}`, newData);
       updateGameState(newData);
     }
   };
@@ -208,7 +235,6 @@ export default function Home() {
     playSfx('slam'); 
     const pId = kickTarget.id;
     const newData = JSON.parse(JSON.stringify(gameState));
-    
     const target = newData.players.find(p => p.id === pId);
     if (target) {
         target.isDead = true; 
@@ -217,7 +243,6 @@ export default function Home() {
         target.traits.forEach(t => t.visible = true);
     }
     newData.players.forEach(p => { p.votes = 0; p.isNominated = false; });
-    addLog(`CRITICAL: UNIT_${target.name.toUpperCase()} HAS BEEN PURGED FROM BUNKER.`, newData);
     updateGameState(newData);
     setKickTarget(null); 
   };
@@ -226,7 +251,6 @@ export default function Home() {
 
   return (
     <>
-      {/* CSS ДЛЯ ФОЛАУТ-ЕФЕКТІВ */}
       <style>{`
         body { background-color: #020802; }
         .term-text { text-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
@@ -239,10 +263,13 @@ export default function Home() {
         }
       `}</style>
 
-      {/* ГЛОБАЛЬНИЙ CRT-ЕФЕКТ */}
-      <div className="fixed inset-0 z-50 scanlines opacity-30 mix-blend-overlay"></div>
-      <div className="fixed inset-0 z-40 shadow-[inset_0_0_100px_rgba(0,20,0,1)] pointer-events-none"></div>
+      {isBooting && <BootSequence onComplete={handleBootComplete} />}
 
+      <div className={`fixed inset-0 z-50 scanlines opacity-30 mix-blend-overlay ${isBooting ? 'hidden' : 'block'}`}></div>
+      <div className={`fixed inset-0 z-40 shadow-[inset_0_0_100px_rgba(0,20,0,1)] pointer-events-none ${isBooting ? 'hidden' : 'block'}`}></div>
+
+      {/* ОСНОВНИЙ UI (З'являється після завантаження) */}
+      {!isBooting && (
       <div className="p-3 md:p-6 w-full mx-auto space-y-6 max-w-[2000px] animate-[fadeIn_0.5s_ease-out] relative z-10 font-mono text-green-500 selection:bg-green-500 selection:text-black">
         
         {/* ХЕДЕР ТЕРМІНАЛУ */}
@@ -252,7 +279,7 @@ export default function Home() {
               <span className="w-4 h-4 bg-green-500 inline-block animate-pulse"></span>
               ROBCO INDUSTRIES UNIFIED OP_SYS
             </h1>
-            <p className="text-green-700 text-[10px] tracking-widest uppercase mt-1">v2.4.1 // COPYRIGHT 2077 // SECURE CONNECTION ESTABLISHED</p>
+            <p className="text-green-700 text-[10px] tracking-widest uppercase mt-1">v2.4.2 // COPYRIGHT 2077 // SECURE CONNECTION ESTABLISHED</p>
           </div>
           <button 
             onClick={() => setShowSynopsis(!showSynopsis)}
@@ -296,36 +323,49 @@ export default function Home() {
           </div>
         )}
 
-        {/* ПАНЕЛЬ ВЛАСНОЇ СПРАВИ */}
+        {/* ПАНЕЛЬ ВЛАСНОЇ СПРАВИ (ЗМЕНШЕНА ВЕРСІЯ) */}
         {!isHost && myCard && (
-          <div className={`border-2 ${myCard.isDead ? 'border-red-700 bg-red-950/10 text-red-500' : 'border-green-500 bg-green-950/20'} p-5 relative overflow-hidden mt-6`}>
+          <div className={`border-2 ${myCard.isDead ? 'border-red-700 bg-red-950/10 text-red-500' : 'border-green-500 bg-green-950/20'} p-3 md:p-4 relative overflow-hidden mt-4 transition-all duration-300`}>
             
             {myCard.isDead && (
               <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-                <div className="text-red-600 border-4 border-red-600 px-6 py-2 text-6xl font-black uppercase rotate-[-10deg] term-text-red">
+                <div className="text-red-600 border-4 border-red-600 px-4 py-1 text-4xl md:text-5xl font-black uppercase rotate-[-5deg] term-text-red">
                   [ PURGED ]
                 </div>
               </div>
             )}
 
-            <div className="flex items-center gap-4 mb-4 border-b-2 border-current pb-3">
-              <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${myCard.name}`} className={`w-16 h-16 border-2 border-current ${myCard.isDead ? 'filter grayscale sepia hue-rotate-[0deg] saturate-[500%]' : 'pip-boy-filter'}`} alt="avatar" />
-              <div>
-                <h2 className="font-black uppercase tracking-[0.2em] text-lg term-text">&gt; PERSONAL_DOSSIER: {myCard.name}</h2>
-                <div className="opacity-70 text-xs tracking-widest mt-1">ID: {myCard.id.split('-')[0].toUpperCase()} // CLASSIFIED</div>
+            <div className={`flex justify-between items-center ${showDossier ? 'mb-3 border-b border-current pb-2' : ''}`}>
+              <div className="flex items-center gap-3">
+                <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${myCard.name}`} className={`w-10 h-10 border border-current ${myCard.isDead ? 'filter grayscale sepia hue-rotate-[0deg] saturate-[500%]' : 'pip-boy-filter'}`} alt="avatar" />
+                <div>
+                  <h2 className="font-black uppercase tracking-[0.2em] text-sm term-text">&gt; PERSONAL_DOSSIER: {myCard.name}</h2>
+                  <div className="opacity-70 text-[9px] tracking-widest mt-0.5">ID: {myCard.id.split('-')[0].toUpperCase()} // CLASSIFIED</div>
+                </div>
               </div>
+              <button 
+                onClick={() => setShowDossier(!showDossier)}
+                className="text-[10px] font-bold uppercase tracking-widest border border-current px-2 py-1 active:scale-95 transition-colors hover:bg-current hover:text-black z-30"
+              >
+                {showDossier ? '[ HIDE ]' : '[ SHOW ]'}
+              </button>
             </div>
-            <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 relative z-10 ${myCard.isDead ? 'opacity-50 pointer-events-none' : ''}`}>
-              {myCard.traits.map((t, idx) => (
-                 <div key={idx} className={`p-3 border flex flex-col gap-2 ${t.visible ? 'border-current bg-current/10' : 'border-current/30 border-dashed'}`}>
-                    <div className="flex justify-between items-start w-full border-b border-current/30 pb-1 mb-1">
-                        <span className="font-bold uppercase tracking-widest text-[10px] opacity-80">{t.label}</span>
-                        <span className={`text-[9px] uppercase font-black px-1.5 py-0.5 ${t.visible ? 'bg-current text-black' : 'border border-current opacity-60'}`}>{t.visible ? 'PUBLIC' : 'SECURE'}</span>
-                    </div>
-                   <span className="text-sm font-bold uppercase term-text">{t.value}</span>
-                 </div>
-              ))}
-            </div>
+            
+            {showDossier && (
+              <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-2 relative z-10 ${myCard.isDead ? 'opacity-50 pointer-events-none' : ''}`}>
+                {myCard.traits.map((t, idx) => (
+                   <div key={idx} className={`p-2 border flex flex-col justify-center gap-1 ${t.visible ? 'border-current bg-current/10' : 'border-current/30 border-dashed'}`}>
+                      <div className="flex justify-between items-center w-full border-b border-current/30 pb-0.5 mb-0.5">
+                          <span className="font-bold uppercase tracking-widest text-[9px] opacity-80 truncate pr-1">{t.label}</span>
+                          <span className={`text-[8px] shrink-0 uppercase font-black px-1 py-0.5 ${t.visible ? 'bg-current text-black' : 'border border-current opacity-60'}`}>
+                            {t.visible ? 'PUB' : 'SEC'}
+                          </span>
+                      </div>
+                     <span className="text-xs font-bold uppercase term-text leading-tight break-words">{t.value}</span>
+                   </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -358,7 +398,6 @@ export default function Home() {
               return (
               <div key={p.id} className={`flex flex-col border-2 relative overflow-hidden transition-all ${cardStyles} ${bgStyles} ${textStyles}`}>
                 
-                {/* Вертикальний штрихкод */}
                 <div className="absolute right-1 top-10 bottom-10 w-4 opacity-20 text-[8px] leading-none overflow-hidden select-none break-all flex items-center text-center rotate-90">
                   ||| | || |||| | || | |||| || |
                 </div>
@@ -411,7 +450,6 @@ export default function Home() {
                         ${isHost ? 'cursor-grab hover:bg-current/10' : ''}
                         ${t.visible ? 'border-current bg-current/5' : 'border-current/30 border-dashed'}`}
                     >
-                      {/* WATERMARK TOP SECRET */}
                       {!t.visible && !isHost && (
                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20 -rotate-3">
                             <span className="font-black text-xl tracking-widest border-2 border-current px-2">[ TOP SECRET ]</span>
@@ -465,55 +503,56 @@ export default function Home() {
             )})}
           </div>
         </div>
-      </div>
 
-      {/* ЖУРНАЛ ПОДІЙ (ТЕРМІНАЛ) */}
-      {isHost && (
-        <div className="fixed bottom-6 right-6 z-[90] flex flex-col items-end font-mono">
-          {showLog && (
-             <div className="bg-black/95 border-2 border-green-500 w-96 max-h-64 overflow-y-auto p-4 mb-2 shadow-[0_0_20px_rgba(34,197,94,0.3)] text-[10px] flex flex-col gap-2">
-                <div className="border-b-2 border-green-600 pb-2 mb-2 sticky top-0 bg-black z-10 uppercase tracking-widest font-black text-green-400">
-                   &gt; ROOT/SYS_LOGS
-                </div>
-                {(gameState.logs || []).length === 0 && <span className="opacity-50 italic animate-pulse">Waiting for input... _</span>}
-                {(gameState.logs || []).map((l, i) => {
-                   let colorClass = "text-green-500";
-                   if (l.includes('CRITICAL')) colorClass = "text-red-500 term-text-red";
-                   else if (l.includes('TARGET')) colorClass = "text-red-400";
-                   else if (l.includes('SYS_OP')) colorClass = "text-green-300";
-                   return <div key={i} className={`${colorClass} leading-tight break-words`}>{l}</div>
-                })}
-             </div>
-          )}
-          <button onClick={() => setShowLog(!showLog)} className="bg-black hover:bg-green-500 text-green-500 hover:text-black border-2 border-green-500 px-4 py-2 text-xs uppercase font-bold tracking-widest active:scale-95 transition-colors shadow-lg">
-             {showLog ? '[ CLOSE_LOGS ]' : '[ OPEN_LOGS ]'}
-          </button>
-        </div>
-      )}
+        {/* ЖУРНАЛ ПОДІЙ (ТЕРМІНАЛ) */}
+        {isHost && (
+          <div className="fixed bottom-6 right-6 z-[90] flex flex-col items-end font-mono">
+            {showLog && (
+               <div className="bg-black/95 border-2 border-green-500 w-96 max-h-64 overflow-y-auto p-4 mb-2 shadow-[0_0_20px_rgba(34,197,94,0.3)] text-[10px] flex flex-col gap-2">
+                  <div className="border-b-2 border-green-600 pb-2 mb-2 sticky top-0 bg-black z-10 uppercase tracking-widest font-black text-green-400">
+                     &gt; ROOT/SYS_LOGS
+                  </div>
+                  {(gameState.logs || []).length === 0 && <span className="opacity-50 italic animate-pulse">Waiting for input... _</span>}
+                  {(gameState.logs || []).map((l, i) => {
+                     let colorClass = "text-green-500";
+                     if (l.includes('CRITICAL')) colorClass = "text-red-500 term-text-red";
+                     else if (l.includes('TARGET')) colorClass = "text-red-400";
+                     else if (l.includes('SYS_OP')) colorClass = "text-green-300";
+                     return <div key={i} className={`${colorClass} leading-tight break-words`}>{l}</div>
+                  })}
+               </div>
+            )}
+            <button onClick={() => setShowLog(!showLog)} className="bg-black hover:bg-green-500 text-green-500 hover:text-black border-2 border-green-500 px-4 py-2 text-xs uppercase font-bold tracking-widest active:scale-95 transition-colors shadow-lg">
+               {showLog ? '[ CLOSE_LOGS ]' : '[ OPEN_LOGS ]'}
+            </button>
+          </div>
+        )}
 
-      {/* МОДАЛКА ВИГНАННЯ (CRITICAL ALERT) */}
-      {kickTarget && (
-        <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 font-mono text-red-500 scanlines">
-          <div className="bg-[#0a0000] border-4 border-red-600 p-8 shadow-[0_0_50px_rgba(220,38,38,0.4)] max-w-md w-full text-center">
-            <h3 className="text-3xl font-black mb-4 uppercase tracking-widest term-text-red animate-pulse">
-              ! WARNING !
-            </h3>
-            <p className="text-red-400 text-sm mb-6 leading-relaxed font-bold uppercase border-y border-red-900/50 py-4">
-              INITIATING PURGE PROTOCOL FOR UNIT:<br/>
-              <span className="text-xl text-white block mt-2 bg-red-900/50 py-1">[{kickTarget.name}]</span>
-              <br/>
-              <span className="text-[10px] text-red-600 mt-2 block">Action cannot be undone. Subject will be removed from voting pool. Inventory remains accessible.</span>
-            </p>
-            <div className="flex gap-4">
-              <button onClick={() => setKickTarget(null)} className="flex-1 py-3 bg-black hover:bg-red-950 text-red-500 font-bold border-2 border-red-700 uppercase text-xs tracking-widest transition-colors active:scale-95">
-                [ ABORT ]
-              </button>
-              <button onClick={confirmKick} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-black font-black uppercase text-xs tracking-widest transition-colors active:scale-95 shadow-[0_0_15px_rgba(220,38,38,0.5)]">
-                [ CONFIRM ]
-              </button>
+        {/* МОДАЛКА ВИГНАННЯ (CRITICAL ALERT) */}
+        {kickTarget && (
+          <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 font-mono text-red-500 pointer-events-auto">
+            <div className="bg-[#0a0000] border-4 border-red-600 p-8 shadow-[0_0_50px_rgba(220,38,38,0.4)] max-w-md w-full text-center">
+              <h3 className="text-3xl font-black mb-4 uppercase tracking-widest term-text-red animate-pulse">
+                ! WARNING !
+              </h3>
+              <p className="text-red-400 text-sm mb-6 leading-relaxed font-bold uppercase border-y border-red-900/50 py-4">
+                INITIATING PURGE PROTOCOL FOR UNIT:<br/>
+                <span className="text-xl text-white block mt-2 bg-red-900/50 py-1">[{kickTarget.name}]</span>
+                <br/>
+                <span className="text-[10px] text-red-600 mt-2 block">Action cannot be undone. Subject will be removed from voting pool. Inventory remains accessible.</span>
+              </p>
+              <div className="flex gap-4">
+                <button onClick={() => setKickTarget(null)} className="flex-1 py-3 bg-black hover:bg-red-950 text-red-500 font-bold border-2 border-red-700 uppercase text-xs tracking-widest transition-colors active:scale-95">
+                  [ ABORT ]
+                </button>
+                <button onClick={confirmKick} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-black font-black uppercase text-xs tracking-widest transition-colors active:scale-95 shadow-[0_0_15px_rgba(220,38,38,0.5)]">
+                  [ CONFIRM ]
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
+      </div>
       )}
     </>
   );
