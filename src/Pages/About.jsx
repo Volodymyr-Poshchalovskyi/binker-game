@@ -1,7 +1,7 @@
 import { useState, useContext, useEffect } from 'react';
 import { SocketContext } from '../SocketContext';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { MACRO_SCENARIOS, MICRO_CRISES, TRAITS_DB, getRandom } from '../db';
+import { MACRO_SCENARIOS, MICRO_CRISES, TRAITS_DB, BUNKER_STATS, getRandom } from '../db';
 
 export default function About() { 
   const { socket, roomCode, roomPlayers, me, isHost } = useContext(SocketContext);
@@ -10,6 +10,14 @@ export default function About() {
   const [macro, setMacro] = useState(MACRO_SCENARIOS[0]);
   const [micro, setMicro] = useState(MICRO_CRISES[0]);
   const [players, setPlayers] = useState([]);
+
+  const [bunkerData, setBunkerData] = useState({
+    duration: '',
+    mission: '',
+    deficit: '',
+    facility: '',
+    capacity: 0
+  });
 
   if (!isHost) {
     return <Navigate to="/" />;
@@ -35,6 +43,19 @@ export default function About() {
   const rerollWorld = (type) => {
     if (type === 'macro' || type === 'all') setMacro({ ...getRandom(MACRO_SCENARIOS), customText: '' });
     if (type === 'micro' || type === 'all') setMicro({ ...getRandom(MICRO_CRISES), customText: '' });
+    if (type === 'stats' || type === 'all') {
+      const actualPlayersCount = roomPlayers.length > 1 ? roomPlayers.length - 1 : 1; 
+      // Кількість місць у бункері (зазвичай половина від гравців, округлена вгору)
+      const bunkerCapacity = Math.ceil(actualPlayersCount / 2); 
+
+      setBunkerData({
+        duration: getRandom(BUNKER_STATS.durations),
+        mission: getRandom(BUNKER_STATS.missions),
+        deficit: getRandom(BUNKER_STATS.deficits),
+        facility: getRandom(BUNKER_STATS.facilities),
+        capacity: bunkerCapacity
+      });
+    }
   };
 
   const generateAllPlayers = () => {
@@ -67,7 +88,7 @@ export default function About() {
           { label: 'Багаж', icon: '🎒', value: getRandom(TRAITS_DB.luggage), visible: false },
           { label: 'Великий багаж', icon: '🧳', value: getRandom(TRAITS_DB.large_luggage), visible: false },
           { label: 'Факт', icon: 'ℹ️', value: getRandom(TRAITS_DB.facts), visible: false },
-          { label: 'Приховано', icon: '👁️', value: getRandom(TRAITS_DB.facts), visible: false },
+          { label: 'Приховано', icon: 'ℹ️', value: getRandom(TRAITS_DB.facts), visible: false },
           { label: 'Дія 1', icon: '🃏', value: getRandom(TRAITS_DB.actions), visible: false },
           { label: 'Дія 2', icon: '🃏', value: getRandom(TRAITS_DB.actions), visible: false },
         ]
@@ -78,7 +99,8 @@ export default function About() {
 
   const startGame = () => {
     const timerData = { isRunning: false, pausedLeft: 60, endsAt: null };
-    const gameData = { players, macro, micro, isStarted: true, timer: timerData };
+    // Додаємо bunkerData сюди
+    const gameData = { players, macro, micro, bunkerData, isStarted: true, timer: timerData };
     socket.emit('start_game', { roomCode, gameData });
     navigate('/');
   };
@@ -105,6 +127,36 @@ export default function About() {
             onChange={(e) => setMacro({...macro, customText: e.target.value})}
             className="w-full p-3 bg-zinc-950 border border-zinc-800 rounded-lg text-sm text-zinc-200 outline-none focus:border-red-900/50 resize-y min-h-[60px] transition-colors"
           />
+        </div>
+
+        <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-xl space-y-3 hover:border-zinc-700 transition-colors flex flex-col">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Параметри Бункера</h2>
+            <button onClick={() => rerollWorld('stats')} className="text-xs bg-zinc-800 hover:bg-zinc-700 px-3 py-1 rounded text-zinc-300 transition">Reroll</button>
+          </div>
+          
+          <div className="space-y-2 text-sm flex-1">
+            <div className="flex flex-col">
+              <span className="text-zinc-500 text-xs uppercase">Кількість місць:</span>
+              <input type="number" value={bunkerData.capacity} onChange={(e) => setBunkerData({...bunkerData, capacity: parseInt(e.target.value) || 1})} className="bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-zinc-200 outline-none w-20 font-bold" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-zinc-500 text-xs uppercase">Час під землею:</span>
+              <input type="text" value={bunkerData.duration} onChange={(e) => setBunkerData({...bunkerData, duration: e.target.value})} className="bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-zinc-200 outline-none" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-zinc-500 text-xs uppercase">Місія після виходу:</span>
+              <textarea value={bunkerData.mission} onChange={(e) => setBunkerData({...bunkerData, mission: e.target.value})} className="bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-zinc-200 outline-none text-xs resize-y min-h-[40px]" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-red-400/80 text-xs uppercase">Дефіцит:</span>
+              <textarea value={bunkerData.deficit} onChange={(e) => setBunkerData({...bunkerData, deficit: e.target.value})} className="bg-red-950/30 border border-red-900/50 rounded px-2 py-1 text-red-200 outline-none text-xs resize-y min-h-[40px]" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-green-400/80 text-xs uppercase">Бонус інфраструктури:</span>
+              <textarea value={bunkerData.facility} onChange={(e) => setBunkerData({...bunkerData, facility: e.target.value})} className="bg-green-950/30 border border-green-900/50 rounded px-2 py-1 text-green-200 outline-none text-xs resize-y min-h-[40px]" />
+            </div>
+          </div>
         </div>
 
         <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-xl space-y-4 hover:border-zinc-700 transition-colors flex flex-col">
