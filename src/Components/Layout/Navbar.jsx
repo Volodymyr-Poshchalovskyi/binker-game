@@ -16,7 +16,7 @@ export default function Navbar() {
       <nav className="sticky top-0 z-50 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800 p-4 flex justify-between items-center">
         <div className="flex gap-6 items-center">
           <Link to="/" className="text-zinc-100 font-black text-xl tracking-tighter uppercase flex items-center gap-2">
-            <span>Bunker OS</span>
+            <span>Zalupa OS</span>
           </Link>
         </div>
         <button 
